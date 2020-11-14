@@ -2,6 +2,8 @@
 
 Benchmark tool to validate if any of existing embedden storages can be used to store MQTT session queue.
 
+![example](img/example.gif)
+
 ## Build
 ```bash
 > cargo build --release
