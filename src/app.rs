@@ -1,6 +1,7 @@
-use std::{collections::HashMap, rc::Rc, sync::Arc, time::Duration};
+use std::{collections::HashMap, num::NonZeroU16, ops::Add, rc::Rc, sync::Arc, time::Duration};
 
 use anyhow::Result;
+use futures::{future, try_join};
 use rand::{distributions::Standard, Rng};
 use tokio::{
     sync::oneshot::{self, error::TryRecvError, Receiver},
@@ -9,24 +10,45 @@ use tokio::{
 
 use crate::Storage;
 
-pub async fn run<S>(storage: S, secs: u64) -> Result<(IngressStats, EgressStats)>
+pub async fn run<S>(
+    storage: S,
+    secs: u64,
+    parallel: NonZeroU16,
+) -> Result<(IngressStats, EgressStats)>
 where
     S: Storage + Send + Sync + 'static,
 {
     let storage = Arc::new(storage);
 
-    let (ingress_send, ingress_recv) = oneshot::channel();
-    let ingress = tokio::spawn(ingress(storage.clone(), ingress_recv));
+    let (ingress_send, ingress): (Vec<_>, Vec<_>) = (0..parallel.get())
+        .into_iter()
+        .map(|_| {
+            let (tx, rx) = oneshot::channel();
+            let join = tokio::spawn(ingress(storage.clone(), rx));
+            (tx, join)
+        })
+        .unzip();
 
-    let (egress_send, egress_recv) = oneshot::channel();
-    let egress = tokio::spawn(egress(storage, egress_recv));
+    let (egress_send, egress): (Vec<_>, Vec<_>) = (0..parallel.get())
+        .into_iter()
+        .map(|_| {
+            let (tx, rx) = oneshot::channel();
+            let join = tokio::spawn(egress(storage.clone(), rx));
+            (tx, join)
+        })
+        .unzip();
 
     time::sleep(Duration::from_secs(secs)).await;
 
-    ingress_send.send(()).unwrap();
-    egress_send.send(()).unwrap();
+    ingress_send.into_iter().for_each(|tx| tx.send(()).unwrap());
+    egress_send.into_iter().for_each(|tx| tx.send(()).unwrap());
 
-    Ok(tokio::try_join!(ingress, egress)?)
+    let (ingress, egress) = try_join!(future::try_join_all(ingress), future::try_join_all(egress))?;
+
+    Ok((
+        ingress.into_iter().fold(IngressStats::default(), Add::add),
+        egress.into_iter().fold(EgressStats::default(), Add::add),
+    ))
 }
 
 async fn ingress<S>(storage: Arc<S>, mut ingress_recv: Receiver<()>) -> IngressStats
@@ -113,8 +135,32 @@ pub struct EgressStats {
     pub loop_iter: u64,
 }
 
+impl Add<Self> for EgressStats {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            empty: self.empty + rhs.empty,
+            total_bytes: self.total_bytes + rhs.total_bytes,
+            total_items: self.total_items + rhs.total_items,
+            loop_iter: self.loop_iter + rhs.loop_iter,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct IngressStats {
     pub total_bytes: u64,
     pub total_items: u64,
+}
+
+impl Add<Self> for IngressStats {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            total_bytes: self.total_bytes + rhs.total_bytes,
+            total_items: self.total_items + rhs.total_items,
+        }
+    }
 }

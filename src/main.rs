@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::BTreeMap, num::NonZeroU16, str::FromStr};
 
 use anyhow::Result;
 use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
@@ -28,28 +28,25 @@ async fn main() -> Result<()> {
     if opt.storage.contains(&StorageOpt::Memory) {
         pb.set_message("memory");
 
-        let res = app::run(Memory::new("q", opt.queues), opt.duration).await?;
+        let storage = Memory::new("q", opt.queues);
+        let res = app::run(storage, opt.duration, opt.parallel).await?;
         results.insert(StorageOpt::Memory, res);
-
-        pb.tick();
     }
 
     if opt.storage.contains(&StorageOpt::Sled) {
         pb.set_message("sled");
 
-        let res = app::run(Sled::new("sled", "q", opt.queues), opt.duration).await?;
+        let storage = Sled::new("sled", "q", opt.queues);
+        let res = app::run(storage, opt.duration, opt.parallel).await?;
         results.insert(StorageOpt::Sled, res);
-
-        pb.tick();
     }
 
     if opt.storage.contains(&StorageOpt::Rocksdb) {
         pb.set_message("rocksdb");
 
-        let res = app::run(Rocksdb::new("rocksdb", "q", opt.queues), opt.duration).await?;
+        let storage = Rocksdb::new("rocksdb", "q", opt.queues);
+        let res = app::run(storage, opt.duration, opt.parallel).await?;
         results.insert(StorageOpt::Rocksdb, res);
-
-        pb.tick();
     }
 
     pb.finish_and_clear();
@@ -96,6 +93,9 @@ struct Opt {
 
     #[structopt(default_value = "memory", long, short)]
     storage: Vec<StorageOpt>,
+
+    #[structopt(default_value = "1", long, short)]
+    parallel: NonZeroU16,
 }
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
