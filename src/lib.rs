@@ -31,6 +31,10 @@ impl Key {
     pub fn with_offset(offset: u64) -> Self {
         Self(0, offset)
     }
+
+    pub fn offset(&self, other: Self) -> u64 {
+        self.1 - other.1
+    }
 }
 
 impl Display for Key {

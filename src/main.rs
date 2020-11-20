@@ -26,11 +26,17 @@ async fn main() -> Result<()> {
     let mut results = BTreeMap::new();
 
     if opt.memory {
-        pb.set_message("memory");
+        pb.set_message("tree backed memory");
 
-        let storage = Memory::new("q", opt.queues);
+        let storage = Memory::tree("q", opt.queues);
         let res = app::run(storage, opt.duration, opt.parallel).await?;
-        results.insert("memory", res);
+        results.insert("BTreeMap", res);
+
+        pb.set_message("vec backed memory");
+
+        let storage = Memory::vec("q", opt.queues);
+        let res = app::run(storage, opt.duration, opt.parallel).await?;
+        results.insert("VecDeque", res);
     }
 
     if opt.sled {
