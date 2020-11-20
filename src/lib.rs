@@ -2,10 +2,12 @@ use std::{collections::VecDeque, fmt::Display, ops::Deref};
 
 pub mod app;
 mod memory;
+#[cfg(feature = "rocksdb")]
 mod rocksdb;
 mod sled;
 
 pub use crate::memory::Memory;
+#[cfg(feature = "rocksdb")]
 pub use crate::rocksdb::Rocksdb;
 pub use crate::sled::Sled;
 

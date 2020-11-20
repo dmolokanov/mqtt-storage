@@ -1,14 +1,18 @@
-use std::{collections::HashMap, num::NonZeroU16, ops::Add, rc::Rc, sync::Arc, time::Duration};
+use std::{collections::HashMap, num::NonZeroU16, ops::Add, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use futures::{future, try_join};
-use rand::{distributions::Standard, Rng};
+use rand::{distributions::Standard, prelude::ThreadRng, Rng};
 use tokio::{
     sync::oneshot::{self, error::TryRecvError, Receiver},
     time,
 };
 
 use crate::Storage;
+
+thread_local! {
+    static RNG : std::cell::RefCell<ThreadRng> = std::cell::RefCell::new(rand::thread_rng());
+}
 
 pub async fn run<S>(
     storage: S,
@@ -21,7 +25,6 @@ where
     let storage = Arc::new(storage);
 
     let (ingress_send, ingress): (Vec<_>, Vec<_>) = (0..parallel.get())
-        .into_iter()
         .map(|_| {
             let (tx, rx) = oneshot::channel();
             let join = tokio::spawn(ingress(storage.clone(), rx));
@@ -30,7 +33,6 @@ where
         .unzip();
 
     let (egress_send, egress): (Vec<_>, Vec<_>) = (0..parallel.get())
-        .into_iter()
         .map(|_| {
             let (tx, rx) = oneshot::channel();
             let join = tokio::spawn(egress(storage.clone(), rx));
@@ -57,22 +59,27 @@ where
 {
     let names = storage.names();
 
-    let mut rng = rand::thread_rng();
-
     let mut stats = IngressStats::default();
 
     while let Err(TryRecvError::Empty) = ingress_recv.try_recv() {
-        let size = rng.gen_range(0, 1_00);
-        let payload = rng
-            .sample_iter::<u8, Standard>(Standard)
-            .take(size)
-            .collect();
+        let size = RNG.with(|rng| rng.borrow_mut().gen_range(0, 100));
+        let payload = RNG.with(|rng| {
+            rng.borrow_mut()
+                .sample_iter::<u8, Standard>(Standard)
+                .take(size)
+                .collect()
+        });
 
-        let name = &names[rng.gen_range(0, names.len())];
+        let name = RNG.with(|rng| rng.borrow_mut().gen_range(0, names.len()));
+        let name = &names[name];
         storage.push(name, payload);
 
         stats.total_items += 1;
         stats.total_bytes += size as u64;
+
+        if stats.total_bytes % 1000 == 0 {
+            tokio::task::yield_now().await;
+        }
     }
 
     stats
@@ -87,15 +94,13 @@ where
     let mut batches = HashMap::new();
     let mut inflights = HashMap::new();
 
-    let mut rng = rand::thread_rng();
-
     let mut stats = EgressStats::default();
 
     while let Err(TryRecvError::Empty) = egress_recv.try_recv() {
         stats.loop_iter += 1;
 
-        let name = rng.gen_range(0, names.len());
-        let name = Rc::new(format!("q{}", name));
+        let name = RNG.with(|rng| rng.borrow_mut().gen_range(0, names.len()));
+        let name = Arc::new(format!("q{}", name));
 
         let batch = batches
             .entry(name.clone())
@@ -111,7 +116,7 @@ where
             stats.total_items += 1;
             stats.total_bytes += v.len() as u64;
 
-            let index = rng.gen_range(0, inflight.len() + 1);
+            let index = RNG.with(|rng| rng.borrow_mut().gen_range(0, inflight.len() + 1));
             inflight.insert(index, k);
         }
 
@@ -121,6 +126,10 @@ where
 
         if let Some(key) = inflight.pop() {
             storage.remove(&name, key);
+        }
+
+        if stats.total_bytes % 1000 == 0 {
+            tokio::task::yield_now().await;
         }
     }
 

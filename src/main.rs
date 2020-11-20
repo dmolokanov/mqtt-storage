@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, num::NonZeroU16, str::FromStr};
+use std::{collections::BTreeMap, num::NonZeroU16};
 
 use anyhow::Result;
 use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
@@ -7,7 +7,7 @@ use structopt::StructOpt;
 
 use mqtt_storage::{
     app::{self, EgressStats, IngressStats},
-    Memory, Rocksdb, Sled,
+    Memory, Sled,
 };
 
 #[tokio::main]
@@ -25,28 +25,32 @@ async fn main() -> Result<()> {
 
     let mut results = BTreeMap::new();
 
-    if opt.storage.contains(&StorageOpt::Memory) {
+    if opt.memory {
         pb.set_message("memory");
 
         let storage = Memory::new("q", opt.queues);
         let res = app::run(storage, opt.duration, opt.parallel).await?;
-        results.insert(StorageOpt::Memory, res);
+        results.insert("memory", res);
     }
 
-    if opt.storage.contains(&StorageOpt::Sled) {
+    if opt.sled {
         pb.set_message("sled");
 
         let storage = Sled::new("sled", "q", opt.queues);
         let res = app::run(storage, opt.duration, opt.parallel).await?;
-        results.insert(StorageOpt::Sled, res);
+        results.insert("sled", res);
     }
 
-    if opt.storage.contains(&StorageOpt::Rocksdb) {
-        pb.set_message("rocksdb");
+    #[cfg(feature = "rocksdb")]
+    {
+        use mqtt_storage::Rocksdb;
+        if opt.rocksdb {
+            pb.set_message("rocksdb");
 
-        let storage = Rocksdb::new("rocksdb", "q", opt.queues);
-        let res = app::run(storage, opt.duration, opt.parallel).await?;
-        results.insert(StorageOpt::Rocksdb, res);
+            let storage = Rocksdb::new("rocksdb", "q", opt.queues);
+            let res = app::run(storage, opt.duration, opt.parallel).await?;
+            results.insert("rocksdb", res);
+        }
     }
 
     pb.finish_and_clear();
@@ -56,7 +60,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn print(results: BTreeMap<StorageOpt, (IngressStats, EgressStats)>) {
+fn print(results: BTreeMap<&str, (IngressStats, EgressStats)>) {
     let mut table = Table::new();
     table.add_row(row![
         "storage",
@@ -91,40 +95,16 @@ struct Opt {
     #[structopt(default_value = "10", long, short)]
     queues: u16,
 
-    #[structopt(default_value = "memory", long, short)]
-    storage: Vec<StorageOpt>,
+    #[structopt(help = "Examine in-memory storage", long)]
+    memory: bool,
+
+    #[structopt(help = "Examine sled-rs storage", long)]
+    sled: bool,
+
+    #[cfg(feature = "rocksdb")]
+    #[structopt(help = "Examine rocksdb-rs storage", long)]
+    rocksdb: bool,
 
     #[structopt(default_value = "1", long, short)]
     parallel: NonZeroU16,
-}
-
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-enum StorageOpt {
-    Memory,
-    Sled,
-    Rocksdb,
-}
-
-impl FromStr for StorageOpt {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "sled" => Ok(Self::Sled),
-            "memory" => Ok(Self::Memory),
-            "rocksdb" => Ok(Self::Rocksdb),
-            x => Err(format!("unknown storage :{}", x)),
-        }
-    }
-}
-
-impl std::fmt::Display for StorageOpt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let label = match self {
-            StorageOpt::Memory => "memory",
-            StorageOpt::Sled => "sled",
-            StorageOpt::Rocksdb => "rocksdb",
-        };
-        write!(f, "{}", label)
-    }
 }
