@@ -7,7 +7,7 @@ use structopt::StructOpt;
 
 use mqtt_storage::{
     app::{self, EgressStats, IngressStats},
-    Memory, Sled,
+    Memory, QueueFile, Sled,
 };
 
 #[tokio::main]
@@ -45,6 +45,14 @@ async fn main() -> Result<()> {
         let storage = Sled::new("sled", "q", opt.queues);
         let res = app::run(storage, opt.duration, opt.parallel).await?;
         results.insert("sled", res);
+    }
+
+    if opt.queue_file {
+        pb.set_message("queue file");
+
+        let storage = QueueFile::new("qf", "q", opt.queues);
+        let res = app::run(storage, opt.duration, opt.parallel).await?;
+        results.insert("queue file", res);
     }
 
     #[cfg(feature = "rocksdb")]
@@ -110,6 +118,9 @@ struct Opt {
     #[cfg(feature = "rocksdb")]
     #[structopt(help = "Examine rocksdb-rs storage", long)]
     rocksdb: bool,
+
+    #[structopt(help = "Examine queue-file based storage", long)]
+    queue_file: bool,
 
     #[structopt(default_value = "1", long, short)]
     parallel: NonZeroU16,

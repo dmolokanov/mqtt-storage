@@ -116,9 +116,9 @@ impl Queue {
     fn with_flush(&self, f: impl FnOnce(&Tree)) {
         f(&self.tree);
 
-        if self.writes.fetch_add(1, Ordering::SeqCst) > 100 {
-            self.tree.flush().unwrap();
-            self.writes.store(0, Ordering::SeqCst);
-        }
+        // if self.writes.fetch_add(1, Ordering::SeqCst) > 1 {
+        //     self.tree.flush().unwrap();
+        //     self.writes.store(0, Ordering::SeqCst);
+        // }
     }
 }

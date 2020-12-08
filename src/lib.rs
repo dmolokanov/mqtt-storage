@@ -2,11 +2,13 @@ use std::{collections::VecDeque, fmt::Display, ops::Deref};
 
 pub mod app;
 mod memory;
+mod queue_file;
 #[cfg(feature = "rocksdb")]
 mod rocksdb;
 mod sled;
 
 pub use crate::memory::Memory;
+pub use crate::queue_file::QueueFile;
 #[cfg(feature = "rocksdb")]
 pub use crate::rocksdb::Rocksdb;
 pub use crate::sled::Sled;
@@ -20,7 +22,7 @@ pub trait Storage {
 
 pub type Payload = Vec<u8>;
 
-#[derive(Debug, Default, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Key(u16, u64);
 
 impl Key {
